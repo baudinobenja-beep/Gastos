@@ -77,6 +77,11 @@ input:focus-visible,textarea:focus-visible,button:focus-visible,.chip:focus-visi
 .filebtn{position:relative;overflow:hidden}
 .filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .hint{font-size:.85rem;color:var(--muted);margin:0}
+.ferr{font-size:1.1rem;font-weight:600;line-height:1.35;color:var(--danger);background:var(--danger-soft);border-radius:10px;padding:12px 14px;margin:0}
+.falta>.lbl{color:var(--danger)}
+.falta .chips,.falta.amount{outline:2px solid var(--danger);outline-offset:4px;border-radius:10px}
+.acciones{display:flex;gap:10px}
+.acciones .btn{flex:1}
 .empresa-box{border-left:3px solid var(--empresa);padding-left:12px;display:flex;flex-direction:column;gap:14px}
 details summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:.92rem}
 details[open] summary{margin-bottom:12px}
@@ -206,8 +211,11 @@ details[open] summary{margin-bottom:12px}
         </div>
       </details>
 
-      <button class="btn primary" id="guardar" type="submit">Guardar gasto</button>
-      <p class="hint" id="ferr" hidden></p>
+      <p class="ferr" id="ferr" role="alert" hidden></p>
+      <div class="acciones">
+        <button class="btn" id="solo-guardar" type="submit" value="guardar" hidden>Guardar</button>
+        <button class="btn primary" id="guardar" type="submit" value="enviar">Guardar gasto</button>
+      </div>
     </form>
   </section>
 
@@ -332,6 +340,7 @@ function renderForm(){
   const emp = state.tipo==="Empresa";
   $("emp").hidden=!emp;
   if(!$("guardar").disabled) $("guardar").textContent = emp?"Enviar":"Guardar gasto";
+  $("solo-guardar").hidden=!emp;
   if(emp){
     chipRow($("rubro"), RUBROS, state.rubro, v=>{state.rubro=v;renderForm()});
     chipRow($("campo"), CAMPOS, state.campo, v=>{state.campo=v;renderForm()});
@@ -358,18 +367,26 @@ $("foto").onchange=$("foto-gal").onchange=e=>{
 $("f").addEventListener("submit", async e=>{
   e.preventDefault();
   const err=$("ferr"); err.hidden=true;
+  const enviar=state.tipo==="Empresa" && !(e.submitter&&e.submitter.value==="guardar");
+  document.querySelectorAll(".falta").forEach(el=>el.classList.remove("falta"));
   const monto=parseMonto($("monto").value);
-  const problems=[];
-  if(!(monto>0)) problems.push("el monto");
-  if(!state.cat) problems.push("la categoría");
+  const problems=[], marcar=[];
+  if(!(monto>0)){ problems.push("el monto"); marcar.push(document.querySelector(".amount")); }
+  if(!state.cat){ problems.push("la categoría"); marcar.push($("cats").parentNode); }
   if(state.tipo==="Empresa"){
-    if(!state.medio) problems.push("el medio de pago");
-    if(!state.campo) problems.push("el campo destino");
-    if(!state.rubro) problems.push("la actividad");
+    if(!state.rubro){ problems.push("la actividad"); marcar.push($("rubro").parentNode); }
+    if(!state.campo){ problems.push("el campo destino"); marcar.push($("campo").parentNode); }
+    if(!state.medio){ problems.push("el medio de pago"); marcar.push($("medio").parentNode); }
   }
-  if(problems.length){err.textContent="Falta "+(problems.length>1?problems.slice(0,-1).join(", ")+" y "+problems.at(-1):problems[0])+".";err.hidden=false;return}
+  if(problems.length){
+    marcar.forEach(el=>el.classList.add("falta"));
+    err.textContent="Falta completar "+(problems.length>1?problems.slice(0,-1).join(", ")+" y "+problems.at(-1):problems[0])+".";
+    err.hidden=false; err.scrollIntoView({block:"center",behavior:"smooth"});
+    return;
+  }
   if(!idb){err.textContent="No se pudo abrir el registro del celular. Cerrá la app y volvé a abrirla.";err.hidden=false;return}
-  const btn=$("guardar"); btn.disabled=true; btn.textContent=state.tipo==="Empresa"?"Preparando envío…":"Guardando…";
+  const btn=$("guardar"), btn2=$("solo-guardar"); btn.disabled=btn2.disabled=true;
+  (enviar?btn:btn2).textContent=enviar?"Preparando envío…":"Guardando…";
   try{
     const fecha=$("fecha").value||today();
     const emp=state.tipo==="Empresa";
@@ -381,14 +398,14 @@ $("f").addEventListener("submit", async e=>{
       medioPago: emp?(state.medio||""):"", comprobante: emp?(state.comp||""):"",
       cuit: emp&&(state.comp==="Factura A"||state.comp==="Factura B")?$("cuit").value.trim():"",
       comercio:$("comercio").value.trim(), nota:$("nota").value.trim(),
-      foto, fotoUrl:"", envio: emp?"Pendiente":"", envioFecha:"",
+      foto, fotoUrl:"", envio: enviar?"Pendiente":"", envioFecha:"",
       reintegro: emp&&state.medio==="Transferencia personal"?"Pendiente":"",
       creado:new Date().toISOString(), syncPend:true
     };
     await putG(g);
     await reload();
     resetForm();
-    if(emp){
+    if(enviar){
       let img=null;
       try{ img=await composeImage(g,foto); }catch(_){}
       const res=img?await sendImage(img):"fail";
@@ -399,9 +416,10 @@ $("f").addEventListener("submit", async e=>{
   }catch(e2){
     err.textContent="No se guardó ("+(e2&&e2.message||"error")+"). Probá de nuevo.";err.hidden=false;
   }
-  btn.disabled=false; btn.textContent=state.tipo==="Empresa"?"Enviar":"Guardar gasto";
+  btn.disabled=btn2.disabled=false; btn.textContent=state.tipo==="Empresa"?"Enviar":"Guardar gasto"; btn2.textContent="Guardar";
 });
 function resetForm(){
+  document.querySelectorAll(".falta").forEach(el=>el.classList.remove("falta")); $("ferr").hidden=true;
   state={tipo:state.tipo,cat:null,rubro:null,campo:null,medio:null,comp:null,file:null};
   ["monto","cuit","comercio","nota"].forEach(i=>$(i).value="");
   $("foto").value=""; $("foto-gal").value=""; $("thumb").textContent="Sin foto"; $("fecha").value=today();
@@ -523,7 +541,7 @@ function renderMes(){
   if(!rows.length){list.innerHTML='<p class="empty">No hay gastos en '+MESES[Number(m)-1]+'. Cargá uno en la pestaña Cargar.</p>';return}
   list.innerHTML=rows.map(g=>{
     const pills=[`<span class="pill ${g.tipo==="Empresa"?"emp":"per"}">${g.tipo}</span>`];
-    if(g.tipo==="Empresa") pills.push(g.envio==="Enviado"?'<span class="pill ok">Enviado</span>':'<span class="pill warn">Sin enviar</span>');
+    if(g.tipo==="Empresa") pills.push(g.envio==="Enviado"?'<span class="pill ok">Enviado</span>':g.envio==="Pendiente"?'<span class="pill warn">Sin enviar</span>':'<span class="pill">Solo guardado</span>');
     if(g.reintegro) pills.push(`<span class="pill ${g.reintegro==="Reintegrado"?"ok":"warn"}">Reintegro: ${esc(g.reintegro)}</span>`);
     const open=openId===g.codigo;
     let det="";
