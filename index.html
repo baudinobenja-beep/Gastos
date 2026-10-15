@@ -311,18 +311,6 @@ async function nextCodigo(){
   ls("ultimo",String(max+1));
   return "G-"+String(max+1).padStart(4,"0");
 }
-// Shrink camera photos so they fit comfortably on the phone and upload fast
-async function shrink(f){
-  try{
-    const bmp=await createImageBitmap(f);
-    const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));
-    const c=document.createElement("canvas"); c.width=Math.round(bmp.width*k); c.height=Math.round(bmp.height*k);
-    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
-    const b=await new Promise(r=>c.toBlob(r,"image/jpeg",0.8));
-    return b||f;
-  }catch(_){ return f }
-}
-
 /* ---------- form chips ---------- */
 function chipRow(el, opts, cur, onPick){
   el.innerHTML="";
@@ -390,7 +378,7 @@ $("f").addEventListener("submit", async e=>{
   try{
     const fecha=$("fecha").value||today();
     const emp=state.tipo==="Empresa";
-    const foto=state.file?await shrink(state.file):null;
+    const foto=state.file||null; // original photo, untouched
     const codigo=await nextCodigo();
     const g={
       codigo, fecha, mes:ym(fecha), monto, tipo:state.tipo, categoria:state.cat,
@@ -407,7 +395,7 @@ $("f").addEventListener("submit", async e=>{
     resetForm();
     if(enviar){
       let img=null;
-      try{ img=await composeImage(g,foto); }catch(_){}
+      try{ img=await receiptFile(g,foto); }catch(_){}
       const res=img?await sendImage(img):"fail";
       if(res==="shared"){ await update(codigo,{envio:"Enviado",envioFecha:today()}); showDone(g); }
       else showSaved(g, res==="cancel"?"Quedó guardado sin enviar.":"No pude abrir el menú para compartir. Quedó guardado.");
@@ -494,6 +482,82 @@ async function composeImage(g, f){
   if(!blob) throw new Error("canvas");
   return new File([blob],"gasto-"+g.codigo+".jpg",{type:"image/jpeg"});
 }
+// Receipt as a PDF document: WhatsApp sends documents untouched, so the photo keeps its full quality
+function jpegInfo(u8){
+  if(u8[0]!==0xFF||u8[1]!==0xD8) return null;
+  let i=2, w=0, h=0, comps=3, orient=1;
+  while(i+4<u8.length){
+    if(u8[i]!==0xFF){i++;continue}
+    const m=u8[i+1], len=(u8[i+2]<<8)|u8[i+3];
+    if(m===0xE1&&u8[i+4]===0x45&&u8[i+5]===0x78){ // Exif orientation
+      const t=i+10, le=u8[t]===0x49, r16=p=>le?u8[p]|(u8[p+1]<<8):(u8[p]<<8)|u8[p+1];
+      const r32=p=>le?(u8[p]|(u8[p+1]<<8)|(u8[p+2]<<16)|(u8[p+3]<<24))>>>0:((u8[p]<<24)|(u8[p+1]<<16)|(u8[p+2]<<8)|u8[p+3])>>>0;
+      const ifd=t+r32(t+4), n=r16(ifd);
+      for(let k=0;k<n;k++){const e=ifd+2+k*12; if(r16(e)===0x0112){orient=r16(e+8);break}}
+    }
+    if(m>=0xC0&&m<=0xCF&&m!==0xC4&&m!==0xC8&&m!==0xCC){ h=(u8[i+5]<<8)|u8[i+6]; w=(u8[i+7]<<8)|u8[i+8]; comps=u8[i+9]; break }
+    if(m===0xD9||m===0xDA) break;
+    i+=2+len;
+  }
+  return w&&h?{w,h,comps,orient}:null;
+}
+// Original JPEG bytes when they can go straight in; otherwise a full-size, high-quality re-encode
+async function pdfPhoto(f){
+  const u8=new Uint8Array(await f.arrayBuffer());
+  const inf=jpegInfo(u8);
+  if(inf&&inf.orient===1&&(inf.comps===3||inf.comps===1)) return {bytes:u8,w:inf.w,h:inf.h,gray:inf.comps===1};
+  const bmp=await createImageBitmap(f);
+  const c=document.createElement("canvas"); c.width=bmp.width; c.height=bmp.height;
+  c.getContext("2d").drawImage(bmp,0,0);
+  const b=await new Promise(r=>c.toBlob(r,"image/jpeg",0.95));
+  return {bytes:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height,gray:false};
+}
+async function buildPdf(g, f){
+  const PW=595, M=36, lh=17, labelW=130;
+  const latin=s=>String(s).replace(/[ -⁯]/g," ").replace(/[^\x00-\xFF]/g,"?");
+  const pstr=s=>"("+latin(s).replace(/[\\()]/g,"\\$&")+")";
+  const wrap=(t,chars)=>{const out=[];let line="";latin(t).split(/\s+/).forEach(w=>{const tr=line?line+" "+w:w;if(tr.length>chars&&line){out.push(line);line=w}else line=tr});out.push(line);return out};
+  const rows=detailRows(g).map(([k,v])=>[k,wrap(v,Math.floor((PW-2*M-labelW)/(11*0.52)))]);
+  const textH=30+rows.reduce((n,[,l])=>n+l.length*lh,0)+16;
+  const img=f?await pdfPhoto(f):null;
+  const iw=PW-2*M, ih=img?Math.round(img.h*iw/img.w):0;
+  const PH=Math.round(M+textH+(img?ih+12:0)+M);
+  let y=PH-M-18;
+  let s="0.12 0.44 0.33 rg BT /F2 16 Tf "+M+" "+y+" Td "+pstr("Gasto de empresa "+g.codigo)+" Tj ET\n";
+  y-=30;
+  rows.forEach(([k,l])=>{
+    s+="0.36 0.42 0.4 rg BT /F2 11 Tf "+M+" "+y+" Td "+pstr(k)+" Tj ET\n";
+    l.forEach(t=>{s+="0.09 0.14 0.12 rg BT /F1 11 Tf "+(M+labelW)+" "+y+" Td "+pstr(t)+" Tj ET\n";y-=lh});
+  });
+  if(img) s+="q "+iw+" 0 0 "+ih+" "+M+" "+M+" cm /Im1 Do Q\n";
+  const parts=[], offs=[];
+  let len=0;
+  const bin=str=>{const a=new Uint8Array(str.length);for(let i=0;i<str.length;i++)a[i]=str.charCodeAt(i)&255;return a};
+  const push=p=>{parts.push(p);len+=p.length};
+  const obj=(n,body,stream)=>{offs[n]=len;push(bin(n+" 0 obj\n"+body+(stream?"\nstream\n":"\nendobj\n")));if(stream){push(stream);push(bin("\nendstream\nendobj\n"))}};
+  push(bin("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));
+  obj(1,"<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2,"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  obj(3,"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+PW+" "+PH+"] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >>"+(img?" /XObject << /Im1 7 0 R >>":"")+" >> >>");
+  const cs=bin(s);
+  obj(4,"<< /Length "+cs.length+" >>",cs);
+  obj(5,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+  obj(6,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  const n=img?7:6;
+  if(img) obj(7,"<< /Type /XObject /Subtype /Image /Width "+img.w+" /Height "+img.h+" /ColorSpace /"+(img.gray?"DeviceGray":"DeviceRGB")+" /BitsPerComponent 8 /Filter /DCTDecode /Length "+img.bytes.length+" >>",img.bytes);
+  const xref=len;
+  let x="xref\n0 "+(n+1)+"\n0000000000 65535 f \n";
+  for(let i=1;i<=n;i++) x+=String(offs[i]).padStart(10,"0")+" 00000 n \n";
+  x+="trailer\n<< /Size "+(n+1)+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n";
+  push(bin(x));
+  const name=("Gasto "+g.codigo+(g.comercio?" - "+g.comercio:"")).replace(/[\\/:*?"<>|]/g,"").slice(0,60)+".pdf";
+  return new File(parts,name,{type:"application/pdf"});
+}
+// PDF first (keeps quality); the old photo+detail image only if the phone refuses the PDF
+async function receiptFile(g, f){
+  try{ const p=await buildPdf(g,f); if(navigator.canShare&&navigator.canShare({files:[p]})) return p; }catch(_){}
+  return composeImage(g,f);
+}
 // Opens the phone's share menu with the image. Resolves "shared" | "cancel" | "fail".
 async function sendImage(f){
   try{
@@ -510,7 +574,7 @@ function bindActions(root){
     const note=root.querySelector('[data-sharemsg="'+g.codigo+'"]');
     const say=t=>{ if(note){note.textContent=t;note.hidden=false} };
     let img;
-    try{ img=await composeImage(g,g.foto||null); }catch(_){ say("No pude armar la imagen. Usá Solo texto."); return; }
+    try{ img=await receiptFile(g,g.foto||null); }catch(_){ say("No pude armar el archivo. Usá Solo texto."); return; }
     const res=await sendImage(img);
     if(res==="shared"){ await update(g.codigo,{envio:"Enviado",envioFecha:today()}); say("Listo, quedó como enviado."); return; }
     if(res==="cancel") return;
