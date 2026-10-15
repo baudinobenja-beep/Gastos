@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gastos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f6f54">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Gastos">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow column, phone first. Form on top, month ledger in a second tab. */
+:root{
+  --bg:#f3f5f2; --surface:#ffffff; --ink:#18231f; --muted:#5d6b65; --line:#d9e0dc;
+  --accent:#1f6f54; --accent-ink:#ffffff; --accent-soft:#e1efe8;
+  --empresa:#8a4b14; --empresa-soft:#f6e9db;
+  --warn:#9a5b00; --warn-soft:#fbefd6; --ok:#1f6f54; --danger:#a83232; --danger-soft:#f7e2e2;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111815; --surface:#18221e; --ink:#e7eeea; --muted:#9aaaa3; --line:#2b3833;
+  --accent:#5cc49b; --accent-ink:#0d1a14; --accent-soft:#1d3229;
+  --empresa:#e3a467; --empresa-soft:#35261a;
+  --warn:#e7b45a; --warn-soft:#352a14; --ok:#5cc49b; --danger:#ec8585; --danger-soft:#3a1f1f;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111815; --surface:#18221e; --ink:#e7eeea; --muted:#9aaaa3; --line:#2b3833;
+  --accent:#5cc49b; --accent-ink:#0d1a14; --accent-soft:#1d3229;
+  --empresa:#e3a467; --empresa-soft:#35261a;
+  --warn:#e7b45a; --warn-soft:#352a14; --ok:#5cc49b; --danger:#ec8585; --danger-soft:#3a1f1f;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;padding-inline:max(16px,env(safe-area-inset-left));padding-block:calc(12px + env(safe-area-inset-top)) calc(40px + env(safe-area-inset-bottom))}
+.wrap{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-family:var(--f-display);font-weight:700;font-size:1.5rem;margin:0;letter-spacing:-.01em}
+.tabs{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
+.tabs button{border:0;background:none;color:var(--muted);font:600 .9rem var(--f-body);padding:7px 14px;border-radius:999px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:16px}
+.lbl{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 6px}
+.field{display:flex;flex-direction:column}
+input[type=text],input[type=date],input[type=number],textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+input:focus-visible,textarea:focus-visible,button:focus-visible,.chip:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.amount{display:flex;align-items:baseline;gap:6px;border-bottom:2px solid var(--line);padding-bottom:4px}
+.amount:focus-within{border-color:var(--accent)}
+.amount span{font-family:var(--f-display);font-size:1.8rem;color:var(--muted)}
+.amount input{border:0;background:none;padding:0;font-family:var(--f-display);font-weight:700;font-size:2.4rem;font-variant-numeric:tabular-nums;min-width:0}
+.amount input:focus-visible{outline:none}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg button{font:600 1rem var(--f-body);padding:12px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.seg button[aria-pressed="true"][data-v="Personal"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.seg button[aria-pressed="true"][data-v="Empresa"]{border-color:var(--empresa);background:var(--empresa-soft);color:var(--empresa)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 .9rem var(--f-body);padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.photo{display:flex;gap:12px;align-items:center}
+.photo .thumb{width:72px;height:72px;border-radius:10px;border:1.5px dashed var(--line);display:grid;place-items:center;overflow:hidden;flex:none;color:var(--muted);font-size:.75rem;text-align:center;background:var(--bg)}
+.photo .thumb img{width:100%;height:100%;object-fit:cover}
+.photo .act{display:flex;flex-direction:column;gap:6px;min-width:0}
+.btn{font:600 1rem var(--f-body);border-radius:10px;padding:12px 16px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;text-align:center;text-decoration:none;display:inline-block}
+.btn.sm{font-size:.88rem;padding:8px 12px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.wa{background:#1f8f4e;color:#fff;border-color:#1f8f4e}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn:disabled{opacity:.5;cursor:default}
+.filebtn{position:relative;overflow:hidden}
+.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.hint{font-size:.85rem;color:var(--muted);margin:0}
+.empresa-box{border-left:3px solid var(--empresa);padding-left:12px;display:flex;flex-direction:column;gap:14px}
+details summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:.92rem}
+details[open] summary{margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:380px){.grid2{grid-template-columns:1fr}}
+.toast{background:var(--accent-soft);color:var(--ink);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.toast.err{background:var(--danger-soft)}
+.toast p{margin:0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;user-select:all}
+/* ledger */
+.monthbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.monthbar h2{font-family:var(--f-display);font-size:1.3rem;margin:0;text-transform:capitalize}
+.tot{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tot div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px;min-width:0}
+.tot b{display:block;font-family:var(--f-display);font-size:1.1rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tot small{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.tot .re b{color:var(--warn)}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.item{border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item>button{all:unset;box-sizing:border-box;display:grid;grid-template-columns:1fr auto;gap:2px 12px;width:100%;padding:12px 14px;cursor:pointer}
+.item>button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.item .t{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.item .m{font-family:var(--f-display);font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.item .s{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:.8rem;color:var(--muted)}
+.pill{font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+.pill.emp{background:var(--empresa-soft);color:var(--empresa);border-color:transparent}
+.pill.per{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.pill.ok{color:var(--ok)}
+.detail{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}
+.detail img{border-radius:10px;max-height:320px;object-fit:contain;background:var(--bg)}
+.detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:.9rem}
+.detail dt{color:var(--muted)}
+.detail dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.brk{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (max-width:380px){.brk{grid-template-columns:1fr}}
+.brk section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.brk h3{margin:0 0 6px;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.brk p{margin:0;display:flex;justify-content:space-between;gap:8px;font-size:.88rem}
+.brk p b{font-variant-numeric:tabular-nums;font-weight:600}
+.empty{padding:24px 16px;text-align:center;color:var(--muted)}
+.banner{font-size:.85rem;color:var(--muted);background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin:0}
+@media (prefers-reduced-motion:no-preference){.toast{animation:in .25s ease-out}@keyframes in{from{transform:translateY(6px)}to{transform:none}}}
+</style>
+<style>html{-webkit-text-size-adjust:100%}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Gastos</h1>
+    <div class="tabs" role="tablist">
+      <button id="tab-cargar" role="tab" aria-selected="true">Cargar</button>
+      <button id="tab-mes" role="tab" aria-selected="false">Mes</button>
+    </div>
+  </header>
+
+  <p class="banner" id="conn" hidden></p>
+
+  <!-- CARGAR -->
+  <section id="v-cargar" class="wrap" style="gap:16px">
+    <div id="msg" hidden></div>
+    <form id="f" class="panel" novalidate>
+      <div class="photo">
+        <div class="thumb" id="thumb">Sin foto</div>
+        <div class="act">
+          <label class="btn sm filebtn">Sacar foto del ticket
+            <input id="foto" type="file" accept="image/*" capture="environment">
+          </label>
+          <label class="btn sm filebtn">Elegir de la galería
+            <input id="foto-gal" type="file" accept="image/*">
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <p class="lbl">Monto</p>
+        <div class="amount"><span>$</span><input id="monto" type="text" inputmode="decimal" placeholder="0" autocomplete="off" aria-label="Monto en pesos"></div>
+      </div>
+
+      <div class="field">
+        <p class="lbl">Tipo</p>
+        <div class="seg" id="tipo">
+          <button type="button" data-v="Personal" aria-pressed="true">Personal</button>
+          <button type="button" data-v="Empresa" aria-pressed="false">Empresa</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <p class="lbl">Categoría</p>
+        <div class="chips" id="cats"></div>
+      </div>
+
+      <div class="empresa-box" id="emp" hidden>
+        <div class="field">
+          <p class="lbl">Actividad</p>
+          <div class="chips" id="rubro"></div>
+        </div>
+        <div class="field">
+          <p class="lbl">Campo destino</p>
+          <div class="chips" id="campo"></div>
+        </div>
+        <div class="field">
+          <p class="lbl">Medio de pago</p>
+          <div class="chips" id="medio"></div>
+          <p class="hint" id="medio-hint" hidden>Transferencia personal queda pendiente de reintegro.</p>
+        </div>
+        <div class="field">
+          <p class="lbl">Comprobante</p>
+          <div class="chips" id="comp"></div>
+        </div>
+        <div class="field" id="cuit-f" hidden>
+          <label class="lbl" for="cuit">CUIT del comercio</label>
+          <input id="cuit" type="text" inputmode="numeric" placeholder="30-12345678-9" autocomplete="off">
+        </div>
+      </div>
+
+      <details id="mas">
+        <summary>Fecha, comercio y nota</summary>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="grid2">
+            <div class="field"><label class="lbl" for="fecha">Fecha</label><input id="fecha" type="date"></div>
+            <div class="field"><label class="lbl" for="comercio">Comercio</label><input id="comercio" type="text" placeholder="Café Martínez"></div>
+          </div>
+          <div class="field"><label class="lbl" for="nota">Nota</label><textarea id="nota" rows="2" placeholder="Almuerzo con proveedor"></textarea></div>
+        </div>
+      </details>
+
+      <button class="btn primary" id="guardar" type="submit">Guardar gasto</button>
+      <p class="hint" id="ferr" hidden></p>
+    </form>
+  </section>
+
+  <!-- MES -->
+  <section id="v-mes" class="wrap" style="gap:12px" hidden>
+    <div class="monthbar">
+      <button class="btn sm" id="prev" aria-label="Mes anterior">‹</button>
+      <h2 id="mes-t"></h2>
+      <button class="btn sm" id="next" aria-label="Mes siguiente">›</button>
+    </div>
+    <div class="tot">
+      <div><small>Personal</small><b id="t-per">$ 0</b></div>
+      <div><small>Empresa</small><b id="t-emp">$ 0</b></div>
+      <div class="re"><small>A reintegrar</small><b id="t-re">$ 0</b></div>
+    </div>
+    <div class="brk" id="brk" hidden></div>
+    <div class="list" id="list"><p class="empty">Todavía no hay gastos este mes. Cargá el primero en la pestaña Cargar.</p></div>
+
+    <details class="panel" id="ajustes">
+      <summary>Ajustes</summary>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="field"><label class="lbl" for="wa-num">WhatsApp de la empresa (para Solo texto)</label><input id="wa-num" type="tel" autocomplete="off" placeholder="+54 9 358 …"></div>
+        <p class="lbl" style="margin-top:8px">Copia a tu planilla de Google</p>
+        <p class="hint" id="sync-st">Todavía no está conectada.</p>
+        <div class="field"><label class="lbl" for="sync-url">Dirección de la planilla (termina en /exec)</label><input id="sync-url" type="text" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></div>
+        <div class="field"><label class="lbl" for="sync-key">Clave</label><input id="sync-key" type="text" autocomplete="off"></div>
+        <div class="row"><button class="btn sm primary" type="button" id="sync-save">Guardar y copiar ahora</button></div>
+      </div>
+    </details>
+  </section>
+</div>
+
+<script>
+const CATS = {
+  Personal:["Supermercado","Comidas afuera","Transporte y nafta","Casa y servicios","Salud","Ropa y personal","Ocio y salidas","Suscripciones","Educación","Regalos","Otros"],
+  Empresa:["Comidas y viandas","Combustibles y estacionamiento","Viajes y alojamiento","Insumos y repuestos","Otros"]
+};
+const MEDIOS = ["Tarjeta crédito empresa","Transferencia empresa","Cuenta corriente","Transferencia personal"];
+const COMPS = ["Factura A","Factura B","Sin factura"];
+const RUBROS = ["Ganadería","Estructura","Maquinaria","Desarrollo","Agricultura","Otra"];
+const CAMPOS = ["El Lince","El Porvenir","Los Baldes","Otro"];
+const $ = id => document.getElementById(id);
+
+let state = {tipo:"Personal", cat:null, rubro:null, campo:null, medio:null, comp:null, file:null};
+let all = [];            // every gasto stored on this phone
+let viewMonth = ym(today());
+let openId = null;
+let confirmDel = null;
+const urls = {};         // object URLs for photos, by codigo
+
+function today(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function ym(s){return s.slice(0,7)}
+function fmt(n){return "$ "+Number(n||0).toLocaleString("es-AR",{minimumFractionDigits:0,maximumFractionDigits:2})}
+function dmy(s){if(!s)return "";const [y,m,d]=s.split("-");return d+"/"+m+"/"+y}
+function parseMonto(s){
+  s=String(s||"").replace(/[^\d.,]/g,"");
+  if(!s) return NaN;
+  // Argentine style: 12.500,50 -> 12500.50 ; also accept 12500.5
+  if(s.includes(",")) s=s.replace(/\./g,"").replace(",",".");
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
+  return Number(s);
+}
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function ls(k,v){try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(_){ return null }}
+
+/* ---------- storage on the phone (IndexedDB) ---------- */
+let idb=null;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open("gastos",1);
+    r.onupgradeneeded=()=>{ r.result.createObjectStore("gastos",{keyPath:"codigo"}); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+}
+function tx(mode,fn){
+  return new Promise((res,rej)=>{
+    const t=idb.transaction("gastos",mode), st=t.objectStore("gastos");
+    let out; const r=fn(st); if(r) r.onsuccess=()=>{out=r.result};
+    t.oncomplete=()=>res(out); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
+  });
+}
+const putG=g=>tx("readwrite",st=>st.put(g));
+const delG=c=>tx("readwrite",st=>st.delete(c));
+const allG=()=>tx("readonly",st=>st.getAll());
+async function reload(){ all=(await allG()).filter(g=>!g.borrado); renderMes(); updateSyncStatus(); }
+async function update(codigo,patch){
+  const g=(await tx("readonly",st=>st.get(codigo))); if(!g) return;
+  Object.assign(g,patch,{syncPend:true}); await putG(g); await reload(); syncSoon();
+}
+async function nextCodigo(){
+  const rows=await allG();
+  const max=rows.reduce((m,g)=>Math.max(m,Number(String(g.codigo).slice(2))||0),Number(ls("ultimo"))||0);
+  ls("ultimo",String(max+1));
+  return "G-"+String(max+1).padStart(4,"0");
+}
+// Shrink camera photos so they fit comfortably on the phone and upload fast
+async function shrink(f){
+  try{
+    const bmp=await createImageBitmap(f);
+    const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));
+    const c=document.createElement("canvas"); c.width=Math.round(bmp.width*k); c.height=Math.round(bmp.height*k);
+    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    const b=await new Promise(r=>c.toBlob(r,"image/jpeg",0.8));
+    return b||f;
+  }catch(_){ return f }
+}
+
+/* ---------- form chips ---------- */
+function chipRow(el, opts, cur, onPick){
+  el.innerHTML="";
+  opts.forEach(o=>{
+    const b=document.createElement("button");
+    b.type="button"; b.className="chip"; b.textContent=o;
+    b.setAttribute("aria-pressed", String(o===cur));
+    b.onclick=()=>onPick(o===cur?null:o);
+    el.appendChild(b);
+  });
+}
+function renderForm(){
+  document.querySelectorAll("#tipo button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===state.tipo)));
+  chipRow($("cats"), CATS[state.tipo], state.cat, v=>{state.cat=v;renderForm()});
+  const emp = state.tipo==="Empresa";
+  $("emp").hidden=!emp;
+  if(!$("guardar").disabled) $("guardar").textContent = emp?"Enviar":"Guardar gasto";
+  if(emp){
+    chipRow($("rubro"), RUBROS, state.rubro, v=>{state.rubro=v;renderForm()});
+    chipRow($("campo"), CAMPOS, state.campo, v=>{state.campo=v;renderForm()});
+    chipRow($("medio"), MEDIOS, state.medio, v=>{state.medio=v;renderForm()});
+    chipRow($("comp"), COMPS, state.comp, v=>{state.comp=v;renderForm()});
+    $("medio-hint").hidden = state.medio!=="Transferencia personal";
+    $("cuit-f").hidden = !(state.comp==="Factura A"||state.comp==="Factura B");
+  }
+}
+document.querySelectorAll("#tipo button").forEach(b=>b.onclick=()=>{
+  if(state.tipo!==b.dataset.v){state.tipo=b.dataset.v;state.cat=null}
+  renderForm();
+});
+$("fecha").value=today();
+
+$("foto").onchange=$("foto-gal").onchange=e=>{
+  const f=e.target.files&&e.target.files[0];
+  state.file=f||null;
+  if(f){const u=URL.createObjectURL(f);$("thumb").innerHTML='<img alt="Foto del ticket" src="'+u+'">'}
+  else $("thumb").textContent="Sin foto";
+};
+
+/* ---------- save ---------- */
+$("f").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const err=$("ferr"); err.hidden=true;
+  const monto=parseMonto($("monto").value);
+  const problems=[];
+  if(!(monto>0)) problems.push("el monto");
+  if(!state.cat) problems.push("la categoría");
+  if(state.tipo==="Empresa"){
+    if(!state.medio) problems.push("el medio de pago");
+    if(!state.campo) problems.push("el campo destino");
+    if(!state.rubro) problems.push("la actividad");
+  }
+  if(problems.length){err.textContent="Falta "+(problems.length>1?problems.slice(0,-1).join(", ")+" y "+problems.at(-1):problems[0])+".";err.hidden=false;return}
+  if(!idb){err.textContent="No se pudo abrir el registro del celular. Cerrá la app y volvé a abrirla.";err.hidden=false;return}
+  const btn=$("guardar"); btn.disabled=true; btn.textContent=state.tipo==="Empresa"?"Preparando envío…":"Guardando…";
+  try{
+    const fecha=$("fecha").value||today();
+    const emp=state.tipo==="Empresa";
+    const foto=state.file?await shrink(state.file):null;
+    const codigo=await nextCodigo();
+    const g={
+      codigo, fecha, mes:ym(fecha), monto, tipo:state.tipo, categoria:state.cat,
+      rubro: emp?(state.rubro||""):"", campo: emp?(state.campo||""):"",
+      medioPago: emp?(state.medio||""):"", comprobante: emp?(state.comp||""):"",
+      cuit: emp&&(state.comp==="Factura A"||state.comp==="Factura B")?$("cuit").value.trim():"",
+      comercio:$("comercio").value.trim(), nota:$("nota").value.trim(),
+      foto, fotoUrl:"", envio: emp?"Pendiente":"", envioFecha:"",
+      reintegro: emp&&state.medio==="Transferencia personal"?"Pendiente":"",
+      creado:new Date().toISOString(), syncPend:true
+    };
+    await putG(g);
+    await reload();
+    resetForm();
+    if(emp){
+      let img=null;
+      try{ img=await composeImage(g,foto); }catch(_){}
+      const res=img?await sendImage(img):"fail";
+      if(res==="shared"){ await update(codigo,{envio:"Enviado",envioFecha:today()}); showDone(g); }
+      else showSaved(g, res==="cancel"?"Quedó guardado sin enviar.":"No pude abrir el menú para compartir. Quedó guardado.");
+    }else showSaved(g);
+    syncSoon();
+  }catch(e2){
+    err.textContent="No se guardó ("+(e2&&e2.message||"error")+"). Probá de nuevo.";err.hidden=false;
+  }
+  btn.disabled=false; btn.textContent=state.tipo==="Empresa"?"Enviar":"Guardar gasto";
+});
+function resetForm(){
+  state={tipo:state.tipo,cat:null,rubro:null,campo:null,medio:null,comp:null,file:null};
+  ["monto","cuit","comercio","nota"].forEach(i=>$(i).value="");
+  $("foto").value=""; $("foto-gal").value=""; $("thumb").textContent="Sin foto"; $("fecha").value=today();
+  $("mas").open=false;
+  renderForm();
+}
+function showDone(g){
+  const box=$("msg"); box.className="toast"; box.hidden=false;
+  box.innerHTML='<p><b>'+esc(g.codigo)+' enviado:</b> '+esc(fmt(g.monto))+' · '+esc(g.categoria)+'</p><p class="hint">Quedó guardado y marcado como enviado. Si no tenés señal, WhatsApp lo manda cuando vuelva. Si al final no lo mandaste, abrilo en Mes y volvé a enviarlo.</p>';
+  box.scrollIntoView({block:"nearest"});
+}
+function showSaved(g, aviso){
+  const box=$("msg"); box.className="toast"; box.hidden=false;
+  let h='<p><b>'+esc(g.codigo)+' guardado:</b> '+esc(fmt(g.monto))+' · '+esc(g.categoria)+'</p>';
+  if(aviso) h+='<p class="hint">'+esc(aviso)+'</p>';
+  if(g.tipo==="Empresa"){
+    h+='<div class="row">'+shareBtn(g)+'<a class="btn" target="_blank" rel="noopener" href="'+waLink(g)+'">Solo texto</a></div>'
+     + '<p class="hint" data-sharemsg="'+esc(g.codigo)+'" hidden></p>';
+  }
+  box.innerHTML=h;
+  bindActions(box);
+  box.scrollIntoView({block:"nearest"});
+}
+
+/* ---------- WhatsApp ---------- */
+function waText(g){
+  const L=["Gasto de empresa "+g.codigo,"Fecha: "+dmy(g.fecha),"Monto: "+fmt(g.monto),"Categoría: "+g.categoria];
+  if(g.rubro) L.push("Actividad: "+g.rubro);
+  if(g.campo) L.push("Campo destino: "+g.campo);
+  L.push("Medio de pago: "+(g.medioPago||"Sin dato")+(g.medioPago==="Transferencia personal"?" (a reintegrar)":""));
+  L.push("Comprobante: "+(g.comprobante||"Sin dato")+(g.cuit?" · CUIT "+g.cuit:""));
+  if(g.comercio) L.push("Comercio: "+g.comercio);
+  if(g.nota) L.push("Nota: "+g.nota);
+  return L.join("\n");
+}
+// The company number lives only on the phone (Ajustes), never in the published code
+function waLink(g){const n=(ls("waNum")||"").replace(/\D/g,"");return "https://wa.me/"+n+"?text="+encodeURIComponent(waText(g))}
+// Photo + printed detail band, so the data always travels inside the image
+function detailRows(g){
+  const R=[["Fecha",dmy(g.fecha)],["Monto",fmt(g.monto)],["Categoría",g.categoria]];
+  if(g.rubro) R.push(["Actividad",g.rubro]);
+  if(g.campo) R.push(["Campo destino",g.campo]);
+  R.push(["Medio de pago",(g.medioPago||"Sin dato")+(g.medioPago==="Transferencia personal"?" (a reintegrar)":"")]);
+  R.push(["Comprobante",(g.comprobante||"Sin dato")+(g.cuit?" · CUIT "+g.cuit:"")]);
+  if(g.comercio) R.push(["Comercio",g.comercio]);
+  if(g.nota) R.push(["Nota",g.nota]);
+  return R;
+}
+async function composeImage(g, f){
+  try{ await document.fonts.ready }catch(_){}
+  const bmp=f?await createImageBitmap(f):null;
+  const W=bmp?Math.min(1200,bmp.width):1080, ph=bmp?Math.round(bmp.height*W/bmp.width):0;
+  const pad=40, lh=46, labelW=300, F='"Figtree",system-ui,-apple-system,sans-serif';
+  const c=document.createElement("canvas"), x=c.getContext("2d");
+  x.font="500 32px "+F;
+  const wrap=(t,max)=>{const out=[];let line="";String(t).split(/\s+/).forEach(w=>{const tr=line?line+" "+w:w;if(x.measureText(tr).width>max&&line){out.push(line);line=w}else line=tr});out.push(line);return out};
+  const rows=detailRows(g).map(([k,v])=>[k,wrap(v,W-pad*2-labelW)]);
+  const bandH=pad+64+rows.reduce((n,[,l])=>n+l.length*lh,0)+pad;
+  c.width=W; c.height=ph+bandH;
+  x.fillStyle="#ffffff"; x.fillRect(0,0,W,c.height);
+  if(bmp) x.drawImage(bmp,0,0,W,ph);
+  x.fillStyle="#1f6f54"; x.fillRect(0,ph,W,8);
+  let y=ph+pad+36;
+  x.fillStyle="#18231f"; x.font="700 40px "+F;
+  x.fillText("Gasto de empresa "+g.codigo,pad,y); y+=64;
+  rows.forEach(([k,l])=>{
+    x.font="600 30px "+F; x.fillStyle="#5d6b65"; x.fillText(k,pad,y);
+    x.font="500 32px "+F; x.fillStyle="#18231f";
+    l.forEach(t=>{x.fillText(t,pad+labelW,y);y+=lh});
+  });
+  const blob=await new Promise(res=>c.toBlob(res,"image/jpeg",0.88));
+  if(!blob) throw new Error("canvas");
+  return new File([blob],"gasto-"+g.codigo+".jpg",{type:"image/jpeg"});
+}
+// Opens the phone's share menu with the image. Resolves "shared" | "cancel" | "fail".
+async function sendImage(f){
+  try{
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){
+      await navigator.share({files:[f]}); return "shared";
+    }
+  }catch(e){ if(e&&e.name==="AbortError") return "cancel"; }
+  return "fail";
+}
+function shareBtn(g){ return '<button class="btn wa" type="button" data-share="'+esc(g.codigo)+'">Enviar con foto</button>'; }
+function bindActions(root){
+  root.querySelectorAll("[data-share]").forEach(b=>b.onclick=async()=>{
+    const g=all.find(x=>x.codigo===b.dataset.share); if(!g) return;
+    const note=root.querySelector('[data-sharemsg="'+g.codigo+'"]');
+    const say=t=>{ if(note){note.textContent=t;note.hidden=false} };
+    let img;
+    try{ img=await composeImage(g,g.foto||null); }catch(_){ say("No pude armar la imagen. Usá Solo texto."); return; }
+    const res=await sendImage(img);
+    if(res==="shared"){ await update(g.codigo,{envio:"Enviado",envioFecha:today()}); say("Listo, quedó como enviado."); return; }
+    if(res==="cancel") return;
+    say("Este celular no dejó compartir la imagen. Usá Solo texto y adjuntá la foto a mano.");
+  });
+  root.querySelectorAll("[data-sent]").forEach(b=>b.onclick=()=>update(b.dataset.sent,{envio:"Enviado",envioFecha:today()}));
+}
+
+/* ---------- month view ---------- */
+const MESES=["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+function shift(m,d){let [y,mm]=m.split("-").map(Number);mm+=d;if(mm<1){mm=12;y--}if(mm>12){mm=1;y++}return y+"-"+String(mm).padStart(2,"0")}
+$("prev").onclick=()=>{viewMonth=shift(viewMonth,-1);openId=null;renderMes()};
+$("next").onclick=()=>{viewMonth=shift(viewMonth,1);openId=null;renderMes()};
+function photoUrl(g){ if(!g.foto) return ""; return urls[g.codigo]||(urls[g.codigo]=URL.createObjectURL(g.foto)); }
+
+function renderMes(){
+  const [y,m]=viewMonth.split("-");
+  $("mes-t").textContent=MESES[Number(m)-1]+" "+y;
+  const rows=all.filter(g=>g.mes===viewMonth).sort((a,b)=>(b.fecha+b.creado).localeCompare(a.fecha+a.creado));
+  let per=0,emp=0,re=0;
+  rows.forEach(g=>{if(g.tipo==="Empresa")emp+=g.monto;else per+=g.monto; if(g.reintegro==="Pendiente")re+=g.monto});
+  const by=k=>{const o={};rows.filter(g=>g.tipo==="Empresa").forEach(g=>{const v=g[k]||"Sin dato";o[v]=(o[v]||0)+g.monto});return Object.entries(o).sort((a,b)=>b[1]-a[1])};
+  const part=(t,arr)=>'<section><h3>'+t+'</h3>'+arr.map(([n,v])=>'<p><span>'+esc(n)+'</span><b>'+fmt(v)+'</b></p>').join("")+'</section>';
+  $("brk").hidden=!emp;
+  if(emp) $("brk").innerHTML=part("Empresa por actividad",by("rubro"))+part("Empresa por campo",by("campo"));
+  $("t-per").textContent=fmt(per);$("t-emp").textContent=fmt(emp);$("t-re").textContent=fmt(re);
+  const list=$("list");
+  if(!rows.length){list.innerHTML='<p class="empty">No hay gastos en '+MESES[Number(m)-1]+'. Cargá uno en la pestaña Cargar.</p>';return}
+  list.innerHTML=rows.map(g=>{
+    const pills=[`<span class="pill ${g.tipo==="Empresa"?"emp":"per"}">${g.tipo}</span>`];
+    if(g.tipo==="Empresa") pills.push(g.envio==="Enviado"?'<span class="pill ok">Enviado</span>':'<span class="pill warn">Sin enviar</span>');
+    if(g.reintegro) pills.push(`<span class="pill ${g.reintegro==="Reintegrado"?"ok":"warn"}">Reintegro: ${esc(g.reintegro)}</span>`);
+    const open=openId===g.codigo;
+    let det="";
+    if(open){
+      det='<div class="detail">'
+        +(g.foto?'<img alt="Foto del ticket" src="'+photoUrl(g)+'">':'')
+        +'<dl><dt>Fecha</dt><dd>'+dmy(g.fecha)+'</dd>'
+        +(g.comercio?'<dt>Comercio</dt><dd>'+esc(g.comercio)+'</dd>':'')
+        +(g.rubro?'<dt>Actividad</dt><dd>'+esc(g.rubro)+'</dd>':'')
+        +(g.campo?'<dt>Campo destino</dt><dd>'+esc(g.campo)+'</dd>':'')
+        +(g.medioPago?'<dt>Medio de pago</dt><dd>'+esc(g.medioPago)+'</dd>':'')
+        +(g.comprobante?'<dt>Comprobante</dt><dd>'+esc(g.comprobante)+(g.cuit?' · CUIT '+esc(g.cuit):'')+'</dd>':'')
+        +(g.nota?'<dt>Nota</dt><dd>'+esc(g.nota)+'</dd>':'')
+        +(g.envioFecha?'<dt>Enviado</dt><dd>'+dmy(g.envioFecha)+'</dd>':'')
+        +'<dt>Planilla</dt><dd>'+(g.syncPend?'Pendiente de copiar':'Copiado')+'</dd>'
+        +'</dl><div class="row">'
+        +(g.tipo==="Empresa"?shareBtn(g).replace('btn wa','btn sm wa')+'<a class="btn sm" target="_blank" rel="noopener" href="'+waLink(g)+'">Solo texto</a>':'')
+        +(g.tipo==="Empresa"&&g.envio!=="Enviado"?'<button class="btn sm" type="button" data-sent="'+esc(g.codigo)+'">Ya lo mandé</button>':'')
+        +(confirmDel===g.codigo
+          ?'<button class="btn sm danger" type="button" data-delok="'+esc(g.codigo)+'">Sí, borrar</button><button class="btn sm" type="button" data-delno="1">No</button>'
+          :'<button class="btn sm danger" type="button" data-del="'+esc(g.codigo)+'">Borrar</button>')
+        +'</div><p class="hint" data-sharemsg="'+esc(g.codigo)+'" hidden></p></div>';
+    }
+    return `<div class="item"><button type="button" data-open="${esc(g.codigo)}" aria-expanded="${open}">
+      <span class="t">${esc(g.comercio||g.categoria)}</span><span class="m">${fmt(g.monto)}</span>
+      <span class="s">${dmy(g.fecha).slice(0,5)} · ${esc(g.categoria)}${g.campo?" · "+esc(g.campo):""} · ${esc(g.codigo)} ${pills.join("")}</span></button>${det}</div>`;
+  }).join("");
+  list.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{openId=openId===b.dataset.open?null:b.dataset.open;confirmDel=null;renderMes()});
+  list.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{confirmDel=b.dataset.del;renderMes()});
+  list.querySelectorAll("[data-delno]").forEach(b=>b.onclick=()=>{confirmDel=null;renderMes()});
+  list.querySelectorAll("[data-delok]").forEach(b=>b.onclick=async()=>{
+    const c=b.dataset.delok; confirmDel=null; openId=null;
+    // keep a tombstone until the sheet hears about it
+    await update(c,{borrado:true});
+  });
+  bindActions(list);
+}
+
+/* ---------- copy to Google Sheet (when there is signal) ---------- */
+let syncing=false, syncTimer=null;
+function syncCfg(){ return {url:(ls("syncUrl")||"").trim(), key:(ls("syncKey")||"").trim()}; }
+function syncSoon(){ clearTimeout(syncTimer); syncTimer=setTimeout(sync,800); }
+function b64(blob){ return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(blob)}); }
+async function sync(){
+  const {url,key}=syncCfg();
+  if(syncing||!url||!idb||navigator.onLine===false) { updateSyncStatus(); return; }
+  syncing=true;
+  let fails=0, lastErr="";
+  try{
+    const pend=(await allG()).filter(g=>g.syncPend);
+    for(const g of pend){
+      const row={...g}; delete row.foto; delete row.syncPend;
+      if(g.foto&&!g.fotoUrl){ row.fotoBase64=await b64(g.foto); row.fotoTipo=g.foto.type||"image/jpeg"; }
+      try{
+        const r=await fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({clave:key,accion:g.borrado?"borrar":"guardar",gasto:row})});
+        const j=await r.json();
+        if(!j.ok) throw new Error(j.error||"respuesta inválida");
+        if(g.borrado){ await delG(g.codigo); }
+        else{
+          const cur=await tx("readonly",st=>st.get(g.codigo));
+          // only clear the flag if nothing changed while we were uploading
+          if(cur&&JSON.stringify({...cur,foto:0})===JSON.stringify({...g,foto:0})){ cur.syncPend=false; if(j.fotoUrl) cur.fotoUrl=j.fotoUrl; await putG(cur); }
+          else if(cur&&j.fotoUrl){ cur.fotoUrl=j.fotoUrl; await putG(cur); }
+        }
+      }catch(e){ fails++; lastErr=e.message||String(e); }
+    }
+    ls("syncLast",new Date().toISOString());
+    ls("syncErr",fails?lastErr:"");
+  }finally{ syncing=false; }
+  await reload();
+}
+function updateSyncStatus(){
+  const {url}=syncCfg(); const n=all.filter(g=>g.syncPend).length;
+  const err=ls("syncErr"); const last=ls("syncLast");
+  let t;
+  if(!url) t="Todavía no está conectada. Los gastos quedan guardados en este celular.";
+  else if(navigator.onLine===false) t="Sin señal: "+n+" gasto"+(n===1?"":"s")+" esperando para copiarse.";
+  else if(err) t="No se pudo copiar ("+err+"). "+n+" pendiente"+(n===1?"":"s")+".";
+  else t=n?n+" gasto"+(n===1?"":"s")+" esperando para copiarse.":"Todo copiado a la planilla"+(last?" ("+new Date(last).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})+")":"")+".";
+  $("sync-st").textContent=t;
+}
+$("wa-num").value=ls("waNum")||""; $("wa-num").onchange=()=>ls("waNum",$("wa-num").value.trim());
+$("sync-url").value=ls("syncUrl")||""; $("sync-key").value=ls("syncKey")||"";
+$("sync-save").onclick=()=>{ ls("syncUrl",$("sync-url").value.trim()); ls("syncKey",$("sync-key").value.trim()); ls("syncErr",""); sync(); };
+window.addEventListener("online",()=>{ updateSyncStatus(); syncSoon(); });
+window.addEventListener("offline",updateSyncStatus);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) syncSoon(); });
+
+/* ---------- tabs ---------- */
+function tab(which){
+  $("tab-cargar").setAttribute("aria-selected",String(which==="cargar"));
+  $("tab-mes").setAttribute("aria-selected",String(which==="mes"));
+  $("v-cargar").hidden=which!=="cargar"; $("v-mes").hidden=which!=="mes";
+  if(which==="mes") renderMes();
+}
+$("tab-cargar").onclick=()=>tab("cargar");
+$("tab-mes").onclick=()=>tab("mes");
+
+renderForm(); renderMes();
+
+/* ---------- start ---------- */
+(async()=>{
+  try{ idb=await openDB(); await reload(); syncSoon(); }
+  catch(e){ $("conn").hidden=false; $("conn").textContent="No se pudo abrir el registro del celular ("+(e&&e.message||"error")+")."; }
+  try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(_){}
+  if("serviceWorker" in navigator){ try{ await navigator.serviceWorker.register("sw.js"); }catch(_){} }
+  const standalone=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+  if(!standalone && /iPhone|iPad/.test(navigator.userAgent) && !ls("hideInstall")){
+    $("conn").hidden=false;
+    $("conn").innerHTML='Para usarla sin señal, instalala: en Safari tocá Compartir y después <b>Agregar a pantalla de inicio</b>. <button class="btn sm" type="button" id="hide-inst">Ocultar</button>';
+    $("hide-inst").onclick=()=>{ ls("hideInstall","1"); $("conn").hidden=true; };
+  }
+})();
+</script>
+
+</body>
+</html>
