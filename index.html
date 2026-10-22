@@ -87,6 +87,8 @@ details summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:.92r
 details[open] summary{margin-bottom:12px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media (max-width:380px){.grid2{grid-template-columns:1fr}}
+.editbar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-soft);border-radius:var(--r);padding:10px 14px}
+.editbar p{margin:0;font-weight:600}
 .toast{background:var(--accent-soft);color:var(--ink);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
 .toast.err{background:var(--danger-soft)}
 .toast p{margin:0}
@@ -145,6 +147,7 @@ details[open] summary{margin-bottom:12px}
   <!-- CARGAR -->
   <section id="v-cargar" class="wrap" style="gap:16px">
     <div id="msg" hidden></div>
+    <div class="editbar" id="editbar" hidden><p id="edit-t"></p><button class="btn sm" type="button" id="edit-cancel">Cancelar</button></div>
     <form id="f" class="panel" novalidate>
       <div class="photo">
         <div class="thumb" id="thumb">Sin foto</div>
@@ -176,6 +179,12 @@ details[open] summary{margin-bottom:12px}
         <div class="chips" id="cats"></div>
       </div>
 
+      <div class="field">
+        <p class="lbl">Medio de pago</p>
+        <div class="chips" id="medio"></div>
+        <p class="hint" id="medio-hint" hidden>Transferencia personal queda pendiente de reintegro.</p>
+      </div>
+
       <div class="empresa-box" id="emp" hidden>
         <div class="field">
           <p class="lbl">Actividad</p>
@@ -184,11 +193,6 @@ details[open] summary{margin-bottom:12px}
         <div class="field">
           <p class="lbl">Campo destino</p>
           <div class="chips" id="campo"></div>
-        </div>
-        <div class="field">
-          <p class="lbl">Medio de pago</p>
-          <div class="chips" id="medio"></div>
-          <p class="hint" id="medio-hint" hidden>Transferencia personal queda pendiente de reintegro.</p>
         </div>
         <div class="field">
           <p class="lbl">Comprobante</p>
@@ -253,13 +257,17 @@ const CATS = {
   Personal:["Supermercado","Comidas afuera","Transporte y nafta","Casa y servicios","Salud","Ropa y personal","Ocio y salidas","Suscripciones","Educación","Regalos","Otros"],
   Empresa:["Comidas y viandas","Combustibles y estacionamiento","Viajes y alojamiento","Insumos y repuestos","Peajes","Otros"]
 };
-const MEDIOS = ["Tarjeta crédito empresa","Transferencia empresa","Cuenta corriente","Transferencia personal"];
+const MEDIOS = {
+  Personal:["Transferencia","Tarjeta de crédito"],
+  Empresa:["Tarjeta crédito empresa","Transferencia empresa","Cuenta corriente","Transferencia personal"]
+};
 const COMPS = ["Factura A","Factura B","Sin factura"];
 const RUBROS = ["Ganadería","Estructura","Maquinaria","Desarrollo","Agricultura","Otra"];
 const CAMPOS = ["El Lince","El Porvenir","Los Baldes","Otro"];
 const $ = id => document.getElementById(id);
 
 let state = {tipo:"Personal", cat:null, rubro:null, campo:null, medio:null, comp:null, file:null};
+let editing = null;       // codigo of the gasto being edited, if any
 let all = [];            // every gasto stored on this phone
 let viewMonth = ym(today());
 let openId = null;
@@ -327,19 +335,19 @@ function renderForm(){
   chipRow($("cats"), CATS[state.tipo], state.cat, v=>{state.cat=v;renderForm()});
   const emp = state.tipo==="Empresa";
   $("emp").hidden=!emp;
-  if(!$("guardar").disabled) $("guardar").textContent = emp?"Enviar":"Guardar gasto";
-  $("solo-guardar").hidden=!emp;
+  chipRow($("medio"), MEDIOS[state.tipo], state.medio, v=>{state.medio=v;renderForm()});
+  $("medio-hint").hidden = !emp || state.medio!=="Transferencia personal";
+  if(!$("guardar").disabled) $("guardar").textContent = editing?"Guardar cambios":emp?"Enviar":"Guardar gasto";
+  $("solo-guardar").hidden=!emp||!!editing;
   if(emp){
     chipRow($("rubro"), RUBROS, state.rubro, v=>{state.rubro=v;renderForm()});
     chipRow($("campo"), CAMPOS, state.campo, v=>{state.campo=v;renderForm()});
-    chipRow($("medio"), MEDIOS, state.medio, v=>{state.medio=v;renderForm()});
     chipRow($("comp"), COMPS, state.comp, v=>{state.comp=v;renderForm()});
-    $("medio-hint").hidden = state.medio!=="Transferencia personal";
     $("cuit-f").hidden = !(state.comp==="Factura A"||state.comp==="Factura B");
   }
 }
 document.querySelectorAll("#tipo button").forEach(b=>b.onclick=()=>{
-  if(state.tipo!==b.dataset.v){state.tipo=b.dataset.v;state.cat=null}
+  if(state.tipo!==b.dataset.v){state.tipo=b.dataset.v;state.cat=null;state.medio=null}
   renderForm();
 });
 $("fecha").value=today();
@@ -355,7 +363,7 @@ $("foto").onchange=$("foto-gal").onchange=e=>{
 $("f").addEventListener("submit", async e=>{
   e.preventDefault();
   const err=$("ferr"); err.hidden=true;
-  const enviar=state.tipo==="Empresa" && !(e.submitter&&e.submitter.value==="guardar");
+  const enviar=!editing && state.tipo==="Empresa" && !(e.submitter&&e.submitter.value==="guardar");
   document.querySelectorAll(".falta").forEach(el=>el.classList.remove("falta"));
   const monto=parseMonto($("monto").value);
   const problems=[], marcar=[];
@@ -364,8 +372,8 @@ $("f").addEventListener("submit", async e=>{
   if(state.tipo==="Empresa"){
     if(!state.rubro){ problems.push("la actividad"); marcar.push($("rubro").parentNode); }
     if(!state.campo){ problems.push("el campo destino"); marcar.push($("campo").parentNode); }
-    if(!state.medio){ problems.push("el medio de pago"); marcar.push($("medio").parentNode); }
   }
+  if(!state.medio){ problems.push("el medio de pago"); marcar.push($("medio").parentNode); }
   if(problems.length){
     marcar.forEach(el=>el.classList.add("falta"));
     err.textContent="Falta completar "+(problems.length>1?problems.slice(0,-1).join(", ")+" y "+problems.at(-1):problems[0])+".";
@@ -376,6 +384,7 @@ $("f").addEventListener("submit", async e=>{
   const btn=$("guardar"), btn2=$("solo-guardar"); btn.disabled=btn2.disabled=true;
   (enviar?btn:btn2).textContent=enviar?"Preparando envío…":"Guardando…";
   try{
+    if(editing){ await saveEdit(monto); return; }
     const fecha=$("fecha").value||today();
     const emp=state.tipo==="Empresa";
     const foto=state.file||null; // original photo, untouched
@@ -383,7 +392,7 @@ $("f").addEventListener("submit", async e=>{
     const g={
       codigo, fecha, mes:ym(fecha), monto, tipo:state.tipo, categoria:state.cat,
       rubro: emp?(state.rubro||""):"", campo: emp?(state.campo||""):"",
-      medioPago: emp?(state.medio||""):"", comprobante: emp?(state.comp||""):"",
+      medioPago: state.medio||"", comprobante: emp?(state.comp||""):"",
       cuit: emp&&(state.comp==="Factura A"||state.comp==="Factura B")?$("cuit").value.trim():"",
       comercio:$("comercio").value.trim(), nota:$("nota").value.trim(),
       foto, fotoUrl:"", envio: enviar?"Pendiente":"", envioFecha:"",
@@ -403,9 +412,45 @@ $("f").addEventListener("submit", async e=>{
     syncSoon();
   }catch(e2){
     err.textContent="No se guardó ("+(e2&&e2.message||"error")+"). Probá de nuevo.";err.hidden=false;
+  }finally{
+    btn.disabled=btn2.disabled=false; btn.textContent=editing?"Guardar cambios":state.tipo==="Empresa"?"Enviar":"Guardar gasto"; btn2.textContent="Guardar";
   }
-  btn.disabled=btn2.disabled=false; btn.textContent=state.tipo==="Empresa"?"Enviar":"Guardar gasto"; btn2.textContent="Guardar";
 });
+/* ---------- edit an existing gasto (same form) ---------- */
+function startEdit(codigo){
+  const g=all.find(x=>x.codigo===codigo); if(!g) return;
+  resetForm();
+  editing=codigo;
+  state={tipo:g.tipo,cat:g.categoria||null,rubro:g.rubro||null,campo:g.campo||null,medio:g.medioPago||null,comp:g.comprobante||null,file:null};
+  $("monto").value=String(g.monto).replace(".",",");
+  $("cuit").value=g.cuit||""; $("comercio").value=g.comercio||""; $("nota").value=g.nota||""; $("fecha").value=g.fecha||today();
+  if(g.foto) $("thumb").innerHTML='<img alt="Foto del ticket" src="'+photoUrl(g)+'">';
+  $("edit-t").textContent="Editando "+g.codigo;
+  $("editbar").hidden=false; $("msg").hidden=true; $("mas").open=true;
+  renderForm(); tab("cargar"); window.scrollTo(0,0);
+}
+async function saveEdit(monto){
+  const codigo=editing, g=await tx("readonly",st=>st.get(codigo)); if(!g) throw new Error("no encontrado");
+  const emp=state.tipo==="Empresa", fecha=$("fecha").value||g.fecha;
+  const patch={
+    fecha, mes:ym(fecha), monto, tipo:state.tipo, categoria:state.cat,
+    rubro: emp?(state.rubro||""):"", campo: emp?(state.campo||""):"",
+    medioPago: state.medio||"", comprobante: emp?(state.comp||""):"",
+    cuit: emp&&(state.comp==="Factura A"||state.comp==="Factura B")?$("cuit").value.trim():"",
+    comercio:$("comercio").value.trim(), nota:$("nota").value.trim(),
+    reintegro: emp&&state.medio==="Transferencia personal"?(g.reintegro||"Pendiente"):"",
+    envio: emp?(g.envio||""):"", editado:new Date().toISOString()
+  };
+  if(state.file){
+    patch.foto=state.file; patch.fotoUrl="";
+    if(urls[codigo]){ URL.revokeObjectURL(urls[codigo]); delete urls[codigo]; }
+  }
+  await update(codigo,patch);
+  viewMonth=patch.mes; openId=codigo;
+  endEdit(); tab("mes");
+}
+function endEdit(){ editing=null; $("editbar").hidden=true; resetForm(); }
+$("edit-cancel").onclick=()=>{ const c=editing; endEdit(); if(c){openId=c;tab("mes")} };
 function resetForm(){
   document.querySelectorAll(".falta").forEach(el=>el.classList.remove("falta")); $("ferr").hidden=true;
   state={tipo:state.tipo,cat:null,rubro:null,campo:null,medio:null,comp:null,file:null};
@@ -622,6 +667,8 @@ function renderMes(){
         +(g.envioFecha?'<dt>Enviado</dt><dd>'+dmy(g.envioFecha)+'</dd>':'')
         +'<dt>Planilla</dt><dd>'+(g.syncPend?'Pendiente de copiar':'Copiado')+'</dd>'
         +'</dl><div class="row">'
+        +'<button class="btn sm" type="button" data-edit="'+esc(g.codigo)+'">Editar</button>'
+        +(g.foto?'':'<label class="btn sm filebtn">Agregar foto<input type="file" accept="image/*" data-addfoto="'+esc(g.codigo)+'"></label>')
         +(g.tipo==="Empresa"?shareBtn(g).replace('btn wa','btn sm wa')+'<a class="btn sm" target="_blank" rel="noopener" href="'+waLink(g)+'">Solo texto</a>':'')
         +(g.tipo==="Empresa"&&g.envio!=="Enviado"?'<button class="btn sm" type="button" data-sent="'+esc(g.codigo)+'">Ya lo mandé</button>':'')
         +(confirmDel===g.codigo
@@ -635,6 +682,11 @@ function renderMes(){
   }).join("");
   list.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{openId=openId===b.dataset.open?null:b.dataset.open;confirmDel=null;renderMes()});
   list.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{confirmDel=b.dataset.del;renderMes()});
+  list.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>startEdit(b.dataset.edit));
+  list.querySelectorAll("[data-addfoto]").forEach(inp=>inp.onchange=async()=>{
+    const f=inp.files&&inp.files[0]; if(!f) return;
+    await update(inp.dataset.addfoto,{foto:f,fotoUrl:""});
+  });
   list.querySelectorAll("[data-delno]").forEach(b=>b.onclick=()=>{confirmDel=null;renderMes()});
   list.querySelectorAll("[data-delok]").forEach(b=>b.onclick=async()=>{
     const c=b.dataset.delok; confirmDel=null; openId=null;

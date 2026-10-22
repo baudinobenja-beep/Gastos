@@ -1,5 +1,5 @@
 // Keeps the app available without signal: app files from cache, refreshed when online.
-const CACHE = "gastos-v4";
+const CACHE = "gastos-v5";
 const APP = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
