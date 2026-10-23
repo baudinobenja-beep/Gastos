@@ -74,6 +74,7 @@ function obtenerHoja() {
     hoja.appendRow(TITULOS);
     hoja.setFrozenRows(1);
     hoja.getRange(1, 1, 1, TITULOS.length).setFontWeight('bold');
+    hoja.getRange('C:C').setNumberFormat('@'); // keep "2026-10" as text, not a date
     hoja.getRange('D:D').setNumberFormat('$ #,##0.00');
   }
   return hoja;
