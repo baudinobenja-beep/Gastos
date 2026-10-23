@@ -238,15 +238,19 @@ details[open] summary{margin-bottom:12px}
     <div class="brk" id="brk" hidden></div>
     <div class="list" id="list"><p class="empty">Todavía no hay gastos este mes. Cargá el primero en la pestaña Cargar.</p></div>
 
+    <div class="panel" id="syncbox" style="gap:10px">
+      <p class="hint" id="sync-st">Todavía no está conectada.</p>
+      <button class="btn primary" type="button" id="sync-now">Sincronizar con la planilla</button>
+    </div>
+
     <details class="panel" id="ajustes">
       <summary>Ajustes</summary>
       <div style="display:flex;flex-direction:column;gap:12px">
         <div class="field"><label class="lbl" for="wa-num">WhatsApp de la empresa (para Solo texto)</label><input id="wa-num" type="tel" autocomplete="off" placeholder="+54 9 358 …"></div>
-        <p class="lbl" style="margin-top:8px">Copia a tu planilla de Google</p>
-        <p class="hint" id="sync-st">Todavía no está conectada.</p>
+        <p class="lbl" style="margin-top:8px">Planilla de Google</p>
         <div class="field"><label class="lbl" for="sync-url">Dirección de la planilla (termina en /exec)</label><input id="sync-url" type="text" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></div>
         <div class="field"><label class="lbl" for="sync-key">Clave</label><input id="sync-key" type="text" autocomplete="off"></div>
-        <div class="row"><button class="btn sm primary" type="button" id="sync-save">Guardar y copiar ahora</button></div>
+        <div class="row"><button class="btn sm primary" type="button" id="sync-save">Guardar</button></div>
       </div>
     </details>
   </section>
@@ -311,7 +315,7 @@ const allG=()=>tx("readonly",st=>st.getAll());
 async function reload(){ all=(await allG()).filter(g=>!g.borrado); renderMes(); updateSyncStatus(); }
 async function update(codigo,patch){
   const g=(await tx("readonly",st=>st.get(codigo))); if(!g) return;
-  Object.assign(g,patch,{syncPend:true}); await putG(g); await reload(); syncSoon();
+  Object.assign(g,patch,{syncPend:true}); await putG(g); await reload();
 }
 async function nextCodigo(){
   const rows=await allG();
@@ -409,7 +413,6 @@ $("f").addEventListener("submit", async e=>{
       if(res==="shared"){ await update(codigo,{envio:"Enviado",envioFecha:today()}); showDone(g); }
       else showSaved(g, res==="cancel"?"Quedó guardado sin enviar.":"No pude abrir el menú para compartir. Quedó guardado.");
     }else showSaved(g);
-    syncSoon();
   }catch(e2){
     err.textContent="No se guardó ("+(e2&&e2.message||"error")+"). Probá de nuevo.";err.hidden=false;
   }finally{
@@ -696,55 +699,69 @@ function renderMes(){
   bindActions(list);
 }
 
-/* ---------- copy to Google Sheet (when there is signal) ---------- */
-let syncing=false, syncTimer=null;
+/* ---------- copy to Google Sheet when Benja taps Sincronizar; photos stay on the phone ---------- */
+let syncing=false, syncProg="";
 function syncCfg(){ return {url:(ls("syncUrl")||"").trim(), key:(ls("syncKey")||"").trim()}; }
-function syncSoon(){ clearTimeout(syncTimer); syncTimer=setTimeout(sync,800); }
-function b64(blob){ return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(blob)}); }
-async function sync(){
+async function post(body){
   const {url,key}=syncCfg();
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({clave:key,...body})});
+  const j=await r.json();
+  if(!j.ok) throw new Error(j.error||"respuesta inválida");
+  return j;
+}
+async function sync(){
+  const {url}=syncCfg();
   if(syncing||!url||!idb||navigator.onLine===false) { updateSyncStatus(); return; }
-  syncing=true;
-  let fails=0, lastErr="";
+  syncing=true; $("sync-now").disabled=true;
+  let fails=0, lastErr="", done=0;
+  const meses=new Set([ym(today())]);
   try{
     const pend=(await allG()).filter(g=>g.syncPend);
     for(const g of pend){
+      syncProg="Copiando "+(++done)+" de "+pend.length+"…"; updateSyncStatus();
       const row={...g}; delete row.foto; delete row.syncPend;
-      if(g.foto&&!g.fotoUrl){ row.fotoBase64=await b64(g.foto); row.fotoTipo=g.foto.type||"image/jpeg"; }
       try{
-        const r=await fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({clave:key,accion:g.borrado?"borrar":"guardar",gasto:row})});
-        const j=await r.json();
-        if(!j.ok) throw new Error(j.error||"respuesta inválida");
+        const j=await post({accion:g.borrado?"borrar":"guardar",gasto:row});
+        if(g.mes) meses.add(g.mes);
+        (j.meses||[]).forEach(m=>m&&meses.add(m));
         if(g.borrado){ await delG(g.codigo); }
         else{
           const cur=await tx("readonly",st=>st.get(g.codigo));
           // only clear the flag if nothing changed while we were uploading
-          if(cur&&JSON.stringify({...cur,foto:0})===JSON.stringify({...g,foto:0})){ cur.syncPend=false; if(j.fotoUrl) cur.fotoUrl=j.fotoUrl; await putG(cur); }
-          else if(cur&&j.fotoUrl){ cur.fotoUrl=j.fotoUrl; await putG(cur); }
+          if(cur&&JSON.stringify({...cur,foto:0})===JSON.stringify({...g,foto:0})){ cur.syncPend=false; await putG(cur); }
         }
       }catch(e){ fails++; lastErr=e.message||String(e); }
     }
+    // once everything is in, the sheet builds the ordered tab of each month touched
+    if(!fails){
+      syncProg="Ordenando la planilla…"; updateSyncStatus();
+      try{ const j=await post({accion:"armar",meses:[...meses].sort()}); ls("syncHojas",(j.hojas||[]).join(", ")); }
+      catch(e){ fails++; lastErr=e.message||String(e); }
+    }
     ls("syncLast",new Date().toISOString());
     ls("syncErr",fails?lastErr:"");
-  }finally{ syncing=false; }
+  }finally{ syncing=false; syncProg=""; $("sync-now").disabled=false; }
   await reload();
 }
 function updateSyncStatus(){
   const {url}=syncCfg(); const n=all.filter(g=>g.syncPend).length;
-  const err=ls("syncErr"); const last=ls("syncLast");
+  const err=ls("syncErr"); const last=ls("syncLast"); const hojas=ls("syncHojas");
+  const pl=n===1?"":"s";
   let t;
-  if(!url) t="Todavía no está conectada. Los gastos quedan guardados en este celular.";
-  else if(navigator.onLine===false) t="Sin señal: "+n+" gasto"+(n===1?"":"s")+" esperando para copiarse.";
-  else if(err) t="No se pudo copiar ("+err+"). "+n+" pendiente"+(n===1?"":"s")+".";
-  else t=n?n+" gasto"+(n===1?"":"s")+" esperando para copiarse.":"Todo copiado a la planilla"+(last?" ("+new Date(last).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})+")":"")+".";
+  if(!url) t="La planilla todavía no está conectada (Ajustes, más abajo). Los gastos quedan guardados en este celular.";
+  else if(syncProg) t=syncProg;
+  else if(err) t="No se pudo sincronizar ("+err+"). "+n+" gasto"+pl+" sin copiar.";
+  else if(n) t=n+" gasto"+pl+" sin copiar a la planilla.";
+  else t="Todo copiado a la planilla"+(last?" el "+new Date(last).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}):"")+(hojas?". Hoja ordenada: "+hojas+".":".");
   $("sync-st").textContent=t;
+  $("sync-now").hidden=!url;
 }
 $("wa-num").value=ls("waNum")||""; $("wa-num").onchange=()=>ls("waNum",$("wa-num").value.trim());
 $("sync-url").value=ls("syncUrl")||""; $("sync-key").value=ls("syncKey")||"";
-$("sync-save").onclick=()=>{ ls("syncUrl",$("sync-url").value.trim()); ls("syncKey",$("sync-key").value.trim()); ls("syncErr",""); sync(); };
-window.addEventListener("online",()=>{ updateSyncStatus(); syncSoon(); });
+$("sync-save").onclick=()=>{ ls("syncUrl",$("sync-url").value.trim()); ls("syncKey",$("sync-key").value.trim()); ls("syncErr",""); updateSyncStatus(); };
+$("sync-now").onclick=sync;
+window.addEventListener("online",updateSyncStatus);
 window.addEventListener("offline",updateSyncStatus);
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden) syncSoon(); });
 
 /* ---------- tabs ---------- */
 function tab(which){
@@ -760,7 +777,7 @@ renderForm(); renderMes();
 
 /* ---------- start ---------- */
 (async()=>{
-  try{ idb=await openDB(); await reload(); syncSoon(); }
+  try{ idb=await openDB(); await reload(); }
   catch(e){ $("conn").hidden=false; $("conn").textContent="No se pudo abrir el registro del celular ("+(e&&e.message||"error")+")."; }
   try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(_){}
   if("serviceWorker" in navigator){ try{ await navigator.serviceWorker.register("sw.js"); }catch(_){} }
