@@ -236,6 +236,7 @@ details[open] summary{margin-bottom:12px}
       <div class="re"><small>A reintegrar</small><b id="t-re">$ 0</b></div>
     </div>
     <div class="brk" id="brk" hidden></div>
+    <div class="panel" id="reint" hidden style="gap:10px"></div>
     <div class="list" id="list"><p class="empty">Todavía no hay gastos este mes. Cargá el primero en la pestaña Cargar.</p></div>
 
     <div class="panel" id="syncbox" style="gap:10px">
@@ -316,6 +317,10 @@ async function reload(){ all=(await allG()).filter(g=>!g.borrado); renderMes(); 
 async function update(codigo,patch){
   const g=(await tx("readonly",st=>st.get(codigo))); if(!g) return;
   Object.assign(g,patch,{syncPend:true}); await putG(g); await reload();
+}
+async function updateMany(codigos,patch){
+  for(const c of codigos){ const g=await tx("readonly",st=>st.get(c)); if(g){ Object.assign(g,patch,{syncPend:true}); await putG(g); } }
+  await reload();
 }
 async function nextCodigo(){
   const rows=await allG();
@@ -560,46 +565,93 @@ async function pdfPhoto(f){
   const b=await new Promise(r=>c.toBlob(r,"image/jpeg",0.95));
   return {bytes:new Uint8Array(await b.arrayBuffer()),w:c.width,h:c.height,gray:false};
 }
-async function buildPdf(g, f){
+const latin=s=>String(s).replace(/[\u2000-\u206F]/g," ").replace(/[^\x00-\xFF]/g,"?");
+const pstr=s=>"("+latin(s).replace(/[\\()]/g,"\\$&")+")";
+const pwrap=(t,chars)=>{const out=[];let line="";latin(t).split(/\s+/).forEach(w=>{const tr=line?line+" "+w:w;if(tr.length>chars&&line){out.push(line);line=w}else line=tr});out.push(line);return out};
+const ptext=(x,y,t,size,bold,color)=>(color||"0.09 0.14 0.12")+" rg BT /F"+(bold?2:1)+" "+size+" Tf "+x.toFixed(1)+" "+y.toFixed(1)+" Td "+pstr(t)+" Tj ET\n";
+// Helvetica widths (1/1000 em) for the characters a peso amount uses
+const pwidth=(t,size)=>latin(t).split("").reduce((n,c)=>n+(/[0-9$]/.test(c)?556:/[.,: ]/.test(c)?278:520),0)*size/1000;
+// One receipt page: detail on top, photo below at full quality
+async function receiptPage(g, f){
   const PW=595, M=36, lh=17, labelW=130;
-  const latin=s=>String(s).replace(/[ -⁯]/g," ").replace(/[^\x00-\xFF]/g,"?");
-  const pstr=s=>"("+latin(s).replace(/[\\()]/g,"\\$&")+")";
-  const wrap=(t,chars)=>{const out=[];let line="";latin(t).split(/\s+/).forEach(w=>{const tr=line?line+" "+w:w;if(tr.length>chars&&line){out.push(line);line=w}else line=tr});out.push(line);return out};
-  const rows=detailRows(g).map(([k,v])=>[k,wrap(v,Math.floor((PW-2*M-labelW)/(11*0.52)))]);
+  const rows=detailRows(g).map(([k,v])=>[k,pwrap(v,Math.floor((PW-2*M-labelW)/(11*0.52)))]);
   const textH=30+rows.reduce((n,[,l])=>n+l.length*lh,0)+16;
   const img=f?await pdfPhoto(f):null;
   const iw=PW-2*M, ih=img?Math.round(img.h*iw/img.w):0;
   const PH=Math.round(M+textH+(img?ih+12:0)+M);
   let y=PH-M-18;
-  let s="0.12 0.44 0.33 rg BT /F2 16 Tf "+M+" "+y+" Td "+pstr("Gasto de empresa "+g.codigo)+" Tj ET\n";
+  let s=ptext(M,y,"Gasto de empresa "+g.codigo,16,true,"0.12 0.44 0.33");
   y-=30;
   rows.forEach(([k,l])=>{
-    s+="0.36 0.42 0.4 rg BT /F2 11 Tf "+M+" "+y+" Td "+pstr(k)+" Tj ET\n";
-    l.forEach(t=>{s+="0.09 0.14 0.12 rg BT /F1 11 Tf "+(M+labelW)+" "+y+" Td "+pstr(t)+" Tj ET\n";y-=lh});
+    s+=ptext(M,y,k,11,true,"0.36 0.42 0.4");
+    l.forEach(t=>{s+=ptext(M+labelW,y,t,11);y-=lh});
   });
   if(img) s+="q "+iw+" 0 0 "+ih+" "+M+" "+M+" cm /Im1 Do Q\n";
+  return {w:PW,h:PH,ops:s,img};
+}
+// Minimal PDF writer: pages of text ops, each with at most one JPEG (/Im1)
+function makePdf(pages, name){
   const parts=[], offs=[];
   let len=0;
   const bin=str=>{const a=new Uint8Array(str.length);for(let i=0;i<str.length;i++)a[i]=str.charCodeAt(i)&255;return a};
   const push=p=>{parts.push(p);len+=p.length};
   const obj=(n,body,stream)=>{offs[n]=len;push(bin(n+" 0 obj\n"+body+(stream?"\nstream\n":"\nendobj\n")));if(stream){push(stream);push(bin("\nendstream\nendobj\n"))}};
+  let n=5; const ids=pages.map(pg=>{const id={page:n++,cont:n++};if(pg.img)id.img=n++;return id});
   push(bin("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"));
   obj(1,"<< /Type /Catalog /Pages 2 0 R >>");
-  obj(2,"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  obj(3,"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+PW+" "+PH+"] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >>"+(img?" /XObject << /Im1 7 0 R >>":"")+" >> >>");
-  const cs=bin(s);
-  obj(4,"<< /Length "+cs.length+" >>",cs);
-  obj(5,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-  obj(6,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-  const n=img?7:6;
-  if(img) obj(7,"<< /Type /XObject /Subtype /Image /Width "+img.w+" /Height "+img.h+" /ColorSpace /"+(img.gray?"DeviceGray":"DeviceRGB")+" /BitsPerComponent 8 /Filter /DCTDecode /Length "+img.bytes.length+" >>",img.bytes);
+  obj(2,"<< /Type /Pages /Kids ["+ids.map(i=>i.page+" 0 R").join(" ")+"] /Count "+pages.length+" >>");
+  obj(3,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+  obj(4,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  pages.forEach((pg,i)=>{
+    const id=ids[i];
+    obj(id.page,"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+pg.w+" "+pg.h+"] /Contents "+id.cont+" 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >>"+(pg.img?" /XObject << /Im1 "+id.img+" 0 R >>":"")+" >> >>");
+    const cs=bin(pg.ops);
+    obj(id.cont,"<< /Length "+cs.length+" >>",cs);
+    if(pg.img) obj(id.img,"<< /Type /XObject /Subtype /Image /Width "+pg.img.w+" /Height "+pg.img.h+" /ColorSpace /"+(pg.img.gray?"DeviceGray":"DeviceRGB")+" /BitsPerComponent 8 /Filter /DCTDecode /Length "+pg.img.bytes.length+" >>",pg.img.bytes);
+  });
   const xref=len;
-  let x="xref\n0 "+(n+1)+"\n0000000000 65535 f \n";
-  for(let i=1;i<=n;i++) x+=String(offs[i]).padStart(10,"0")+" 00000 n \n";
-  x+="trailer\n<< /Size "+(n+1)+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n";
+  let x="xref\n0 "+n+"\n0000000000 65535 f \n";
+  for(let i=1;i<n;i++) x+=String(offs[i]).padStart(10,"0")+" 00000 n \n";
+  x+="trailer\n<< /Size "+n+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n";
   push(bin(x));
-  const name=("Gasto "+g.codigo+(g.comercio?" - "+g.comercio:"")).replace(/[\\/:*?"<>|]/g,"").slice(0,60)+".pdf";
-  return new File(parts,name,{type:"application/pdf"});
+  return new File(parts,name.replace(/[\\/:*?"<>|]/g,"").slice(0,60)+".pdf",{type:"application/pdf"});
+}
+async function buildPdf(g, f){
+  return makePdf([await receiptPage(g,f)],"Gasto "+g.codigo+(g.comercio?" - "+g.comercio:""));
+}
+// Reimbursement request: a detailed list with the total, then each ticket on its own page
+async function reintegroPdf(rows, mesTxt){
+  const PW=595, PH=842, M=36, lh=14, fs=8.5;
+  const cols=[["Fecha",50],["Código",46],["Categoría",100],["Actividad · Campo",95],["Comprobante",62],["Detalle",110],["Monto",60]];
+  const cell=g=>[dmy(g.fecha),g.codigo,g.categoria,[g.rubro,g.campo].filter(Boolean).join(" · "),(g.comprobante||"")+(g.cuit?" "+g.cuit:""),[g.comercio,g.nota].filter(Boolean).join(" · "),fmt(g.monto)];
+  const fit=(t,w)=>{const max=Math.floor(w/(fs*0.5));t=latin(t);return t.length>max?t.slice(0,max-2)+"..":t};
+  const total=rows.reduce((t,g)=>t+g.monto,0);
+  const pages=[]; let s="", y=0;
+  const head=first=>{
+    s=""; y=PH-M-20;
+    if(first){
+      s+=ptext(M,y,"Pedido de reintegro · "+mesTxt,18,true,"0.12 0.44 0.33"); y-=20;
+      s+=ptext(M,y,"Gastos de empresa pagados de mi bolsillo (transferencia personal).",10,false,"0.36 0.42 0.4"); y-=16;
+      s+=ptext(M,y,rows.length+" gasto"+(rows.length===1?"":"s")+" · Total a reintegrar: "+fmt(total),11,true); y-=26;
+    }
+    let x=M; s+="0.12 0.44 0.33 rg "+M+" "+(y-4)+" "+(PW-2*M)+" "+(lh+2)+" re f\n";
+    cols.forEach(([t,w],i)=>{s+=ptext(i===cols.length-1?PW-M-pwidth(t,fs)-2:x+2,y,t,fs,true,"1 1 1");x+=w});
+    y-=lh+4;
+  };
+  head(true);
+  rows.forEach((g,r)=>{
+    if(y<M+40){ pages.push({w:PW,h:PH,ops:s}); head(false); }
+    if(r%2) s+="0.93 0.96 0.94 rg "+M+" "+(y-4)+" "+(PW-2*M)+" "+lh+" re f\n";
+    let x=M; cell(g).forEach((t,i)=>{const w=cols[i][1]; s+=i===cols.length-1?ptext(PW-M-pwidth(t,fs)-2,y,t,fs):ptext(x+2,y,fit(t,w-4),fs); x+=w});
+    y-=lh;
+  });
+  y-=6; s+="0.09 0.14 0.12 rg "+M+" "+(y+lh-2)+" "+(PW-2*M)+" 0.8 re f\n";
+  const tt=fmt(total); s+=ptext(PW-M-pwidth(tt,10)-2,y,tt,10,true)+ptext(PW-M-pwidth(tt,10)-60,y,"Total",10,true);
+  const con=rows.filter(g=>g.foto).length;
+  if(con) s+=ptext(M,y-24,con===1?"En la página siguiente va el comprobante con foto.":"En las páginas siguientes van los "+con+" comprobantes con foto.",9,false,"0.36 0.42 0.4");
+  pages.push({w:PW,h:PH,ops:s});
+  for(const g of rows) if(g.foto) pages.push(await receiptPage(g,g.foto));
+  return makePdf(pages,"Reintegro "+mesTxt);
 }
 // PDF first (keeps quality); the old photo+detail image only if the phone refuses the PDF
 async function receiptFile(g, f){
@@ -636,6 +688,35 @@ const MESES=["enero","febrero","marzo","abril","mayo","junio","julio","agosto","
 function shift(m,d){let [y,mm]=m.split("-").map(Number);mm+=d;if(mm<1){mm=12;y--}if(mm>12){mm=1;y++}return y+"-"+String(mm).padStart(2,"0")}
 $("prev").onclick=()=>{viewMonth=shift(viewMonth,-1);openId=null;renderMes()};
 $("next").onclick=()=>{viewMonth=shift(viewMonth,1);openId=null;renderMes()};
+/* ---------- reimbursement of out-of-pocket business expenses ---------- */
+let confirmReint=false;
+function renderReint(){
+  const box=$("reint"), [y,m]=viewMonth.split("-"), mesTxt=MESES[Number(m)-1]+" "+y;
+  const rows=all.filter(g=>g.mes===viewMonth&&g.reintegro&&g.reintegro!=="Reintegrado").sort((a,b)=>(a.fecha+a.codigo).localeCompare(b.fecha+b.codigo));
+  box.hidden=!rows.length; if(!rows.length){ confirmReint=false; return; }
+  const tot=rows.reduce((t,g)=>t+g.monto,0), ped=rows.filter(g=>g.reintegro==="Pedido").length;
+  box.innerHTML='<p class="lbl">Reintegro de '+mesTxt+'</p>'
+    +'<p class="hint">'+rows.length+' gasto'+(rows.length===1?'':'s')+' de empresa pagado'+(rows.length===1?'':'s')+' de tu bolsillo: <b>'+fmt(tot)+'</b>'+(ped?' · '+(ped===rows.length?'ya pedido':ped+' ya pedido'+(ped===1?'':'s')):'')+'</p>'
+    +'<button class="btn primary" type="button" id="reint-pedir">Pedir reintegro (PDF con el detalle)</button>'
+    +'<div class="row">'+(confirmReint
+      ?'<button class="btn sm" type="button" id="reint-ok">Sí, me lo reintegraron</button><button class="btn sm" type="button" id="reint-no">No</button>'
+      :'<button class="btn sm" type="button" id="reint-ya">Ya me lo reintegraron</button>')+'</div>'
+    +'<p class="hint" id="reint-msg" hidden></p>';
+  const say=t=>{const p=$("reint-msg");p.textContent=t;p.hidden=false};
+  $("reint-pedir").onclick=async()=>{
+    const b=$("reint-pedir"); b.disabled=true; b.textContent="Armando el PDF…";
+    let f;
+    try{ f=await reintegroPdf(rows,mesTxt.replace(/^./,c=>c.toUpperCase())); }catch(_){ b.disabled=false; b.textContent="Pedir reintegro (PDF con el detalle)"; say("No pude armar el PDF."); return; }
+    const res=await sendImage(f);
+    if(res==="shared"){ await updateMany(rows.filter(g=>g.reintegro==="Pendiente").map(g=>g.codigo),{reintegro:"Pedido"}); return; }
+    b.disabled=false; b.textContent="Pedir reintegro (PDF con el detalle)";
+    if(res==="fail") say("Este celular no dejó compartir el PDF.");
+  };
+  if(confirmReint){
+    $("reint-ok").onclick=async()=>{ confirmReint=false; await updateMany(rows.map(g=>g.codigo),{reintegro:"Reintegrado"}); };
+    $("reint-no").onclick=()=>{ confirmReint=false; renderReint(); };
+  } else $("reint-ya").onclick=()=>{ confirmReint=true; renderReint(); };
+}
 function photoUrl(g){ if(!g.foto) return ""; return urls[g.codigo]||(urls[g.codigo]=URL.createObjectURL(g.foto)); }
 
 function renderMes(){
@@ -643,12 +724,13 @@ function renderMes(){
   $("mes-t").textContent=MESES[Number(m)-1]+" "+y;
   const rows=all.filter(g=>g.mes===viewMonth).sort((a,b)=>(b.fecha+b.creado).localeCompare(a.fecha+a.creado));
   let per=0,emp=0,re=0;
-  rows.forEach(g=>{if(g.tipo==="Empresa")emp+=g.monto;else per+=g.monto; if(g.reintegro==="Pendiente")re+=g.monto});
+  rows.forEach(g=>{if(g.tipo==="Empresa")emp+=g.monto;else per+=g.monto; if(g.reintegro&&g.reintegro!=="Reintegrado")re+=g.monto});
   const by=k=>{const o={};rows.filter(g=>g.tipo==="Empresa").forEach(g=>{const v=g[k]||"Sin dato";o[v]=(o[v]||0)+g.monto});return Object.entries(o).sort((a,b)=>b[1]-a[1])};
   const part=(t,arr)=>'<section><h3>'+t+'</h3>'+arr.map(([n,v])=>'<p><span>'+esc(n)+'</span><b>'+fmt(v)+'</b></p>').join("")+'</section>';
   $("brk").hidden=!emp;
   if(emp) $("brk").innerHTML=part("Empresa por actividad",by("rubro"))+part("Empresa por campo",by("campo"));
   $("t-per").textContent=fmt(per);$("t-emp").textContent=fmt(emp);$("t-re").textContent=fmt(re);
+  renderReint();
   const list=$("list");
   if(!rows.length){list.innerHTML='<p class="empty">No hay gastos en '+MESES[Number(m)-1]+'. Cargá uno en la pestaña Cargar.</p>';return}
   list.innerHTML=rows.map(g=>{
