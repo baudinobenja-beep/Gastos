@@ -1,7 +1,8 @@
 /**
  * Recibe los gastos que manda la app del celular y los guarda en la hoja de su mes
  * (por ejemplo "Octubre 2026"). Cada hoja de mes tiene arriba el resumen con fórmulas
- * a la vista y abajo el cuadro de gastos con filtros, ordenado por fecha.
+ * a la vista, abajo el cuadro de gastos con filtros, ordenado por fecha, y a la
+ * derecha del cuadro la lista "Para reintegrar" (empresa pagado de tu bolsillo).
  * Las fotos de los tickets se quedan en el celular: no se copian a la planilla.
  *
  * Instalación (una sola vez):
@@ -68,7 +69,9 @@ function doPost(e) {
       hoja.getRange(donde.fila, 1, 1, ANCHO).setValues([fila]);
     } else {
       if (donde) donde.hoja.deleteRow(donde.fila); // le cambiaron la fecha a otro mes
-      hoja.getRange(Math.max(hoja.getLastRow(), FILA_ENC) + 1, 1, 1, ANCHO).setValues([fila]);
+      const nueva = ultimaFila(hoja) + 1;
+      if (nueva > hoja.getMaxRows()) hoja.insertRowsAfter(hoja.getMaxRows(), 200);
+      hoja.getRange(nueva, 1, 1, ANCHO).setValues([fila]);
     }
     return responder({ ok: true, meses: [mes, mesAnterior] });
   } catch (err) {
@@ -137,9 +140,16 @@ function hojasDeMes() {
   return SpreadsheetApp.getActiveSpreadsheet().getSheets().filter(h => mesDeHoja(h));
 }
 
+// Última fila del cuadro con un gasto (mira la columna Código; FILA_ENC si no hay ninguno)
+function ultimaFila(hoja) {
+  const v = hoja.getRange(FILA_DATOS, 1, hoja.getMaxRows() - FILA_ENC, 1).getValues();
+  for (let i = v.length - 1; i >= 0; i--) if (v[i][0] !== '') return FILA_DATOS + i;
+  return FILA_ENC;
+}
+
 function buscarGasto(codigo) {
   for (const hoja of hojasDeMes()) {
-    const ultima = hoja.getLastRow();
+    const ultima = ultimaFila(hoja);
     if (ultima < FILA_DATOS) continue;
     const codigos = hoja.getRange(FILA_DATOS, 1, ultima - FILA_ENC, 1).getValues();
     for (let i = 0; i < codigos.length; i++) {
@@ -215,13 +225,33 @@ function ordenarHoja(hoja) {
   const filtro = hoja.getFilter();
   if (filtro) filtro.remove();
   hoja.getBandings().forEach(b => b.remove());
-  const n = Math.max(hoja.getLastRow() - FILA_ENC, 0);
+  const n = ultimaFila(hoja) - FILA_ENC;
   if (n) hoja.getRange(FILA_DATOS, 1, n, ANCHO).sort([{ column: 2, ascending: true }, { column: 1, ascending: true }]);
   const cuadro = hoja.getRange(FILA_ENC, 1, n + 1, ANCHO);
   cuadro.applyRowBanding(SpreadsheetApp.BandingTheme.GREEN, true, false);
   cuadro.createFilter();
+  armarReintegro(hoja);
   hoja.setFrozenRows(0);
-  hoja.autoResizeColumns(1, 17);
+  hoja.autoResizeColumns(1, 23);
+}
+
+// A la derecha del cuadro: gastos de empresa pagados de tu bolsillo que falta reintegrar.
+// Es un FILTER sobre el cuadro, así se actualiza solo y se puede copiar tal cual.
+const COL_REINT = 16; // P
+function armarReintegro(hoja) {
+  const d = c => '$' + c + '$' + FILA_DATOS + ':$' + c;
+  hoja.getRange(FILA_ENC - 1, COL_REINT, 2, 8).setValues([
+    ['Para reintegrar (pagado de tu bolsillo)', '', '', '', '', '', '', ''],
+    ['Fecha', 'Código', 'Categoría', 'Campo destino', 'Comprobante', 'Comercio', 'Monto', 'Reintegro']
+  ]);
+  hoja.getRange(FILA_ENC - 1, COL_REINT + 6).setFormula('=SUM(' + d('V') + ')');
+  hoja.getRange(FILA_DATOS, COL_REINT).setFormula('=IFERROR(FILTER({' + ['B', 'A', 'E', 'G', 'I', 'K', 'D', 'N'].map(d).join(',')
+    + '},' + d('C') + '="Empresa",' + d('H') + '="Transferencia personal",' + d('N') + '<>"Reintegrado"),"")');
+  hoja.getRange(FILA_ENC - 1, COL_REINT, 1, 8).setFontWeight('bold');
+  hoja.getRange(FILA_ENC, COL_REINT, 1, 8).setFontWeight('bold').setBackground('#f4e4c8');
+  hoja.getRange(FILA_ENC - 1, COL_REINT + 6).setNumberFormat(MONEDA);
+  hoja.getRange(FILA_DATOS, COL_REINT, hoja.getMaxRows() - FILA_ENC, 1).setNumberFormat('dd/mm/yyyy');
+  hoja.getRange(FILA_DATOS, COL_REINT + 6, hoja.getMaxRows() - FILA_ENC, 1).setNumberFormat(MONEDA);
 }
 
 // Pasa los gastos de la hoja "Gastos" (versión anterior) a la hoja de su mes y la borra.
